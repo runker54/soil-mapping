@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# 虚拟环境
+venv/
+env/
+
+# 数据文件
+data/raw/*
+data/soil_type_table/*
+data/soil_property_table/*
+data/point_sample/*
+data/polygon_sample/*
+data/soil_property_predict/*
+data/soil_type_predict/*
+data/soil_property/*
+data/soil_type/*
+!data/raw/.gitkeep
+!data/soil_type_table/.gitkeep
+!data/soil_property_table/.gitkeep
+!data/point_sample/.gitkeep
+!data/polygon_sample/.gitkeep
+!data/soil_property_predict/.gitkeep
+!data/soil_type_predict/.gitkeep
+!data/soil_property/.gitkeep
+!data/soil_type/.gitkeep
+
+# 日志
+*.log
+
+# 模型文件
+models/soil_property/*
+models/soil_type/*
+!models/soil_property/.gitkeep
+!models/soil_type/.gitkeep
+
+# 报告和图表
+reports/soil_property/*
+reports/soil_type/*
+figures/soil_property/*
+figures/soil_type/*
+!reports/soil_property/.gitkeep
+!reports/soil_type/.gitkeep
+!figures/soil_property/.gitkeep
+!figures/soil_type/.gitkeep
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# 配置文件
+config.yml
+
+# IDE
+.vscode/
+.idea/
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 临时文件
+*.tmp
+
+# 大文件
+*.tif
+*.shp
+*.csv
+*.xlsx
