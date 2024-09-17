@@ -9,13 +9,9 @@ from pathlib import Path
 import logging
 from tqdm import tqdm
 
-# 设置日志
-log_file = Path('logs/clip_raster_aligin.log')
-logging.basicConfig(filename=log_file, level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
-def align_rasters(base_raster, input_vector, other_rasters_path, output_folder, output_crs=None):
+
+def align_rasters(base_raster, input_vector, other_rasters_path, output_folder, output_crs,logger):
     """
     对齐所有栅格数据。
 
@@ -36,14 +32,12 @@ def align_rasters(base_raster, input_vector, other_rasters_path, output_folder, 
         # 确保矢量和栅格使用相同的坐标系
         if vector.crs != src.crs:
             vector = vector.to_crs(src.crs)
-        
         # 获取矢量的边界
         bounds = vector.total_bounds
         
         # 计算边界范围内的像素
         window = from_bounds(*bounds, src.transform)
         window_ceiled = window.round_offsets(op='ceil')
-        
         # 获取参考信息
         ref_transform = src.window_transform(window_ceiled)
         ref_height = window_ceiled.height
@@ -62,6 +56,7 @@ def align_rasters(base_raster, input_vector, other_rasters_path, output_folder, 
     # 处理所有栅格（包括基准栅格）
     rasters = [os.path.join(other_rasters_path, f) for f in os.listdir(other_rasters_path) if f.endswith('.tif')]
     for raster in tqdm(rasters, desc="处理栅格"):
+        logger.info(f"开始处理栅格: {raster}")
         with rasterio.open(raster) as src:
             # 重投影和裁剪栅格以匹配参考信息
             image, transform = reproject(
@@ -93,11 +88,20 @@ def align_rasters(base_raster, input_vector, other_rasters_path, output_folder, 
 
     logger.info("所有栅格处理完成。")
 
-if __name__ == "__main__":
-    base_raster = r'C:\Users\Runker\Desktop\GL\gltif\DEM.tif'
-    input_vector = r"C:\Users\Runker\Desktop\GL\gl\gl_extent_500m.shp"
-    other_rasters_path = r"C:\Users\Runker\Desktop\GL\gltif"
-    output_folder = r'C:\Users\Runker\Desktop\GL\gl_tif_aligin'
-    output_crs = "EPSG:4544"  # 可选，如果需要重投影
+def main(base_raster, input_vector, other_rasters_path, output_folder, output_crs, log_file):
+    # 设置日志
+    if log_file:
+        log_dir = Path(log_file).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=log_file, level=logging.INFO, 
+                            format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    else:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    logger = logging.getLogger(__name__)
 
-    align_rasters(base_raster, input_vector, other_rasters_path, output_folder, output_crs)
+    try:
+        align_rasters(base_raster, input_vector, other_rasters_path, output_folder, output_crs,logger)
+        logger.info("所有栅格处理完成。")
+    except Exception as e:
+        logger.error(f"处理栅格时发生错误: {e}")
+

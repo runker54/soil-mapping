@@ -1,5 +1,4 @@
 import os
-import sys
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -9,9 +8,6 @@ import logging
 from tqdm import tqdm
 from pathlib import Path
 
-# 设置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 def is_large_integer(series):
     """检查序列是否包含应该被视为字符串的大整数或浮点数"""
@@ -19,7 +15,7 @@ def is_large_integer(series):
         return series.apply(lambda x: x.is_integer() and abs(x) > 2**53 - 1).any()
     return series.dtype == 'int64' and series.abs().max() > 2**53 - 1
 
-def sample_rasters(point_shp_path, raster_folder_path, output_csv_path, keep_out_of_bounds=False, fill_value=np.nan):
+def sample_rasters(point_shp_path, raster_folder_path, output_csv_path, keep_out_of_bounds=False, fill_value=np.nan,logger=None):
     """
     使用来自shapefile的点对栅格文件进行采样，并将结果保存到CSV文件中。
 
@@ -129,19 +125,26 @@ def sample_rasters(point_shp_path, raster_folder_path, output_csv_path, keep_out
                 fill_count = (df[col] == fill_value).sum()
                 logger.info(f"列 {col} 中填充值 {fill_value} 的数量: {fill_count}")
 
-if __name__ == "__main__":
+def main(point_shp_path, raster_folder_path, output_csv_path, keep_out_of_bounds=False, fill_value=np.nan,log_file=None):
+    """
+    主函数
+    """
     # 设置日志
-    log_file = Path('logs/raster_sampling.log')
-
-    # 示例用法
-    point_shp_path = Path(r"C:\Users\Runker\Desktop\GL\gl\gl_sp_chemical_info.shp")
-    raster_folder_path = Path(r'C:\Users\Runker\Desktop\GL\gl_tif_aligin')
-    output_csv_path = Path(r"C:\Users\Runker\Desktop\GL\sample_csv\feature_gl.csv")
+    if log_file:
+        log_dir = Path(log_file).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=log_file, level=logging.INFO, 
+                            format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    else:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
     
+    logger = logging.getLogger(__name__)
+    logger.info("开始点采样过程")
+
     try:
-        # 保留超出范围的点：
-        # sample_rasters(point_shp_path, raster_folder_path, output_csv_path, keep_out_of_bounds=True, fill_value=-9999)
-        # 不保留超出范围的点：
-        sample_rasters(point_shp_path, raster_folder_path, output_csv_path, keep_out_of_bounds=False)
+        sample_rasters(point_shp_path, raster_folder_path, output_csv_path, keep_out_of_bounds, fill_value, logger)
+        logger.info("点采样过程完成")
     except Exception as e:
-        logger.error(f"执行过程中发生错误: {str(e)}")
+        logger.error(f"点采样过程中发生错误: {str(e)}")
+        raise
+

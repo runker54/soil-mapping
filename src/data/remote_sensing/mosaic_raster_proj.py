@@ -8,13 +8,9 @@ import logging
 import sys
 from tqdm import tqdm
 from pathlib import Path
-# 设置日志
-log_file = Path('logs/mosaic_raster_proj.log')
-logging.basicConfig(filename=log_file, level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
-def merge_rasters(raster_path, output_path, target_crs=None):
+
+def merge_rasters(raster_path, output_path, logger, target_crs=None):
     raster_paths = [os.path.join(raster_path, f) for f in os.listdir(raster_path) if f.endswith('.tif')]
     
     try:
@@ -102,13 +98,22 @@ def merge_rasters(raster_path, output_path, target_crs=None):
         for src in src_files:
             src.close()
 
-if __name__ == "__main__":
+def main(input_dir:str,output_path:str,target_crs:str,log_file:str):
+    # 配置日志
+    if log_file:
+        log_dir = Path(log_file).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=log_file, level=logging.INFO, 
+                            format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    else:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    
+    logger = logging.getLogger(__name__)
+    logger.info("开始处理栅格数据")
     try:
-        raster_paths = r'C:\Users\Runker\Desktop\test\gl'
-        output_path = r'F:\tif_features\temp\mosaic.tif'
-        target_crs = "EPSG:4544"  # 目标坐标系统
-        merge_rasters(raster_paths, output_path, target_crs)
-        print("Raster processing completed successfully!")
+        merge_rasters(input_dir, output_path, logger, target_crs)
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
-        logger.exception("An error occurred during raster processing:")
+        logger.error(f"处理栅格数据时发生错误: {str(e)}")
+        raise
+    finally:
+        logger.info("栅格数据处理完成")

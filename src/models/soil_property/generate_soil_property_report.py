@@ -18,13 +18,9 @@ import math
 from concurrent.futures import ProcessPoolExecutor
 from rasterio.plot import show_hist
 
-# 设置日志
-log_file = Path('logs/generate_soil_property_report.log')
-logging.basicConfig(filename=log_file, level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
-def load_evaluation_results(eval_dir):
+
+def load_evaluation_results(logger, eval_dir):
     """加载评估结果"""
     logger.info(f"正在加载评估结果: {eval_dir}")
     file_path = Path(eval_dir) / "reports" / "model_summary.xlsx"
@@ -37,7 +33,7 @@ def load_evaluation_results(eval_dir):
     logger.info(f"评估结果列名: {eval_summary.columns}")
     return eval_summary
 
-def load_prediction_rasters(prediction_dir):
+def load_prediction_rasters(logger, prediction_dir):
     """加载预测结果栅格"""
     logger.info(f"正在加载预测结果栅格: {prediction_dir}")
     prediction_files = list(Path(prediction_dir).glob('*.tif'))
@@ -52,7 +48,7 @@ def load_prediction_rasters(prediction_dir):
     
     return predictions
 
-def process_property(args):
+def process_property(logger, args):
     property_name, raster_path, plot_type = args
     try:
         with rasterio.open(raster_path) as src:
@@ -77,7 +73,7 @@ def process_property(args):
         logger.error(f"处理属性 {property_name} 时出错: {str(e)}")
         return property_name, None
 
-def create_combined_plots(prediction_dir, output_dir, plot_type='maps'):
+def create_combined_plots(logger, prediction_dir, output_dir, plot_type='maps'):
     """创建合并的预测图或直方图"""
     logger.info(f"创建合并的{'预测图' if plot_type == 'maps' else '直方图'}")
     prediction_files = list(Path(prediction_dir).glob('*.tif'))
@@ -92,7 +88,7 @@ def create_combined_plots(prediction_dir, output_dir, plot_type='maps'):
     
     # 使用多进程处理数据
     with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(process_property, (file.stem, str(file), plot_type)) 
+        futures = [executor.submit(process_property, logger,(file.stem, str(file), plot_type)) 
                    for file in prediction_files]
         results = []
         for future in tqdm(futures, total=len(prediction_files), desc=f"处理{plot_type}"):
@@ -136,7 +132,7 @@ def create_combined_plots(prediction_dir, output_dir, plot_type='maps'):
     finally:
         plt.close()
 
-def create_correlation_heatmap(predictions, output_dir):
+def create_correlation_heatmap(logger, predictions, output_dir):
     """创建土壤属性相关性热图"""
     logger.info("创建土壤属性相关性热图")
     pred_df = pd.DataFrame({k: v.flatten() for k, v in predictions.items() if k not in ['transform', 'crs']})
@@ -158,7 +154,7 @@ def create_correlation_heatmap(predictions, output_dir):
     plt.close()
     logger.info("相关性热图已保存")
 
-def create_model_performance_comparison(eval_results, output_dir):
+def create_model_performance_comparison(logger, eval_results, output_dir):
     """创建优化后的模型性能指标比较图"""
     logger.info("创建模型性能指标比较图")
     logger.info(f"评估结果列名: {eval_results.columns}")
@@ -214,7 +210,7 @@ def create_model_performance_comparison(eval_results, output_dir):
     plt.savefig(output_dir / 'model_performance_comparison.png', dpi=300, bbox_inches='tight')
     plt.close()
 
-def create_feature_importance_plot(model_dir, output_dir):
+def create_feature_importance_plot(logger, model_dir, output_dir):
     """创建特征重要性图"""
     logger.info("创建特征重要性图")
     model_files = list(Path(model_dir).glob('*_model.pkl'))
@@ -247,7 +243,7 @@ def create_feature_importance_plot(model_dir, output_dir):
     plt.close()
     logger.info("特征重要性图已保存")
 
-def generate_pdf_report(eval_results, predictions, output_dir, model_dir):
+def generate_pdf_report(logger, eval_results, predictions, output_dir, model_dir):
     """生成PDF报告"""
     logger.info("生成PDF报告")
     output_dir = Path(output_dir)
@@ -364,42 +360,53 @@ def generate_pdf_report(eval_results, predictions, output_dir, model_dir):
     doc.build(story)
     logger.info(f"PDF报告已生成: {pdf_path}")
 
-def generate_soil_property_report(eval_dir, prediction_dir, output_dir, model_dir):
+def generate_soil_property_report(logger, eval_dir, prediction_dir, output_dir, model_dir):
     """生成土壤属性报告"""
     # 加载评估结果
-    eval_results = load_evaluation_results(eval_dir)
+    eval_results = load_evaluation_results(logger, eval_dir)
     
     # 加载预测结果
-    predictions = load_prediction_rasters(prediction_dir)
+    predictions = load_prediction_rasters(logger, prediction_dir)
     
     # 创建输出目录
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # 创建合并的预测图
-    create_combined_plots(prediction_dir, output_dir, plot_type='maps')
+    create_combined_plots(logger, prediction_dir, output_dir, plot_type='maps')
     
     # 创建合并的直方图
-    create_combined_plots(prediction_dir, output_dir, plot_type='histograms')
+    create_combined_plots(logger, prediction_dir, output_dir, plot_type='histograms')
     
     # 创建相关性热图
-    create_correlation_heatmap(predictions, output_dir)
+    create_correlation_heatmap(logger, predictions, output_dir)
     
     # 创建模型性能比较图
-    create_model_performance_comparison(eval_results, output_dir)
+    create_model_performance_comparison(logger, eval_results, output_dir)
     
     # 创建特征重要性图
-    create_feature_importance_plot(model_dir, output_dir)
+    create_feature_importance_plot(logger, model_dir, output_dir)
     
     # 生成PDF报告
-    generate_pdf_report(eval_results, predictions, output_dir, model_dir)
+    generate_pdf_report(logger, eval_results, predictions, output_dir, model_dir)
     
     logger.info("报告生成完成")
 
-if __name__ == "__main__":
-    eval_dir = Path(r"C:\Users\Runker\Desktop\GL\rfrk")
-    prediction_dir = Path(r"C:\Users\Runker\Desktop\GL\gl_tif_properte_predict")
-    output_dir = Path(r"C:\Users\Runker\Desktop\GL\report_output")
-    model_dir = Path(r"C:\Users\Runker\Desktop\GL\rfrk\models")
-    
-    generate_soil_property_report(eval_dir, prediction_dir, output_dir, model_dir)
+
+def main(log_file,eval_dir, prediction_dir, output_dir, model_dir):
+    # 设置日志
+    if log_file:
+        log_dir = Path(log_file).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=log_file, level=logging.INFO, 
+                            format='%(asctime)s - %(levelname)s - %(message)s')
+    else:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+    logger.info("开始生成土壤属性报告")
+    try:
+        generate_soil_property_report(logger, eval_dir, prediction_dir, output_dir, model_dir)
+        logger.info("土壤属性报告生成完成")
+    except Exception as e:
+        logger.error(f"生成土壤属性报告过程中发生错误: {str(e)}")
+        raise

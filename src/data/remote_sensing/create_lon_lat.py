@@ -4,16 +4,11 @@ import logging
 import os
 from pathlib import Path
 
-# 设置日志
-log_file = Path('logs/create_lon_lat.log')
-logging.basicConfig(filename=log_file, level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-def generate_lon_lat(input_path, output_path):
+def generate_lon_lat(input_path, output_path,logger):
     try:
         with rasterio.open(input_path) as src:
             # Get raster dimensions and transform
+            logger.info(f"Raster dimensions: {src.height} x {src.width}")
             height = src.height
             width = src.width
             transform = src.transform
@@ -23,6 +18,7 @@ def generate_lon_lat(input_path, output_path):
             xs, ys = rasterio.transform.xy(transform, rows, cols)
 
             # Convert lists to arrays for raster writing
+            logger.info(f"Creating longitude and latitude rasters")
             lon_array = np.array(xs)
             lat_array = np.array(ys)
 
@@ -35,6 +31,7 @@ def generate_lon_lat(input_path, output_path):
             })
 
             # Write longitude to file
+            
             with rasterio.open(os.path.join(output_path,'lon.tif'), "w", **out_meta) as dest:
                 dest.write(lon_array.astype(rasterio.float32), 1)
 
@@ -46,8 +43,21 @@ def generate_lon_lat(input_path, output_path):
         logger.error(f"Error creating longitude and latitude rasters: {str(e)}")
         raise
 
-if __name__ == "__main__":
-    # This allows the script to be run standalone for testing
-    input_path = r"C:\Users\Runker\Desktop\GL\gltif\DEM.tif"
-    output_path = r"C:\Users\Runker\Desktop\GL\gltif"
-    generate_lon_lat(input_path, output_path)
+def main(input_path, output_path,log_file):
+    # 设置日志
+    if log_file:
+        log_dir = Path(log_file).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=log_file, level=logging.INFO, 
+                            format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    else:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    logger = logging.getLogger(__name__)
+    logger.info("开始创建经纬度栅格")
+    try:
+        generate_lon_lat(input_path, output_path,logger)
+    except Exception as e:
+        logger.error(f"创建经纬度栅格时发生错误: {e}")
+        raise
+    finally:
+        logger.info("经纬度栅格创建完成")

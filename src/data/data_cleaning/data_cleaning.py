@@ -9,26 +9,21 @@ from typing import List, Union, Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import math
 
-# 设置日志
-log_file = Path('logs/data_cleaning.log')
-logging.basicConfig(filename=log_file, level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
 class DataCleaner:
     def __init__(self, df: pd.DataFrame, lat_col: str, lon_col: str):
         self.df = df
         self.lat_col = lat_col
         self.lon_col = lon_col
+        self.logger = logging.getLogger(__name__)
         
     def identify_outliers(self, value_col: str, global_std_threshold: float = 5, local_std_threshold: float = 3, neighbors: int = 8) -> pd.DataFrame:
         """
         识别全局和局部异常值
         """
-        logger.info(f"开始识别 {value_col} 列的异常值")
+        self.logger.info(f"开始识别 {value_col} 列的异常值")
         
         if not pd.api.types.is_numeric_dtype(self.df[value_col]):
-            logger.warning(f"{value_col} 不是数值类型,跳过异常值检测")
+            self.logger.warning(f"{value_col} 不是数值类型,跳过异常值检测")
             return self.df
         
         values = self.df[value_col].values
@@ -67,18 +62,18 @@ class DataCleaner:
             elif is_local_outlier:
                 self.df.loc[self.df.index[i], status_col] = 'Spatial Outlier'
         
-        logger.info(f"{value_col} 列的异常值识别完成")
+        self.logger.info(f"{value_col} 列的异常值识别完成")
         return self.df
     
     def plot_filtered_data(self, value_col: str, output_path: Optional[str] = None):
         """
         可视化清洗前后的数据分布
         """
-        logger.info(f"开始绘制 {value_col} 列的数据分布图")
+        self.logger.info(f"开始绘制 {value_col} 列的数据分布图")
         
         status_col = f"{value_col}_Sta"
         if status_col not in self.df.columns:
-            logger.error(f"列 {status_col} 不存在，跳过绘图")
+            self.logger.error(f"列 {status_col} 不存在，跳过绘图")
             return
         
         fig, axes = plt.subplots(1, 3, figsize=(28, 8))
@@ -123,7 +118,7 @@ class DataCleaner:
         
         if output_path:
             plt.savefig(output_path, dpi=300, bbox_inches='tight')
-            logger.info(f"图像已保存至 {output_path}")
+            self.logger.info(f"图像已保存至 {output_path}")
         
         plt.close(fig)
         
@@ -131,7 +126,7 @@ class DataCleaner:
         """
         绘制所有处理列的汇总图
         """
-        logger.info("开始绘制汇总图")
+        self.logger.info("开始绘制汇总图")
         
         # 计算子图的行数和列数
         n_cols = len(columns)
@@ -144,7 +139,7 @@ class DataCleaner:
         for i, col in enumerate(columns):
             status_col = f"{col}_Sta"
             if status_col not in self.df.columns:
-                logger.warning(f"列 {status_col} 不存在，跳过绘图")
+                self.logger.warning(f"列 {status_col} 不存在，跳过绘图")
                 continue
             
             normal = self.df[self.df[status_col] == 'Normal']
@@ -188,7 +183,7 @@ class DataCleaner:
         
         if output_path:
             plt.savefig(output_path, dpi=300, bbox_inches='tight')
-            logger.info(f"汇总图已保存至 {output_path}")
+            self.logger.info(f"汇总图已保存至 {output_path}")
         
         plt.close(fig)
         
@@ -203,53 +198,106 @@ class DataCleaner:
             try:
                 self.identify_outliers(col, global_std_threshold, local_std_threshold, neighbors)
             except Exception as e:
-                logger.error(f"处理 {col} 列时发生错误: {str(e)}")
+                self.logger.error(f"处理 {col} 列时发生错误: {str(e)}")
         
         for col in columns:
             try:
                 self.plot_filtered_data(col, str(output_path / f"{col}_distribution.png"))
             except Exception as e:
-                logger.error(f"绘制 {col} 列的图像时发生错误: {str(e)}")
+                self.logger.error(f"绘制 {col} 列的图像时发生错误: {str(e)}")
         
         try:
             self.plot_summary(columns, str(output_path / "summary_plot.png"))
         except Exception as e:
-            logger.error(f"绘制汇总图时发生错误: {str(e)}")
+            self.logger.error(f"绘制汇总图时发生错误: {str(e)}")
         
         # 导出清洗后的数据
         cleaned_data_path = output_path / "cleaned_data.csv"
         self.df.to_csv(cleaned_data_path, index=False)
-        logger.info(f"清洗后的数据已保存至 {cleaned_data_path}")
+        self.logger.info(f"清洗后的数据已保存至 {cleaned_data_path}")
+    def generate_cleaning_report(self, columns: List[str]) -> pd.DataFrame:
+        """
+        生成数据清洗报告
+        """
+        self.logger.info("开始生成数据清洗报告")
+        
+        report_data = []
+        for col in columns:
+            status_col = f"{col}_Sta"
+            if status_col not in self.df.columns:
+                self.logger.warning(f"列 {status_col} 不存在，跳过报告生成")
+                continue
+            
+            total_count = len(self.df)
+            normal_count = (self.df[status_col] == 'Normal').sum()
+            global_outlier_count = (self.df[status_col] == 'Global Outlier').sum()
+            spatial_outlier_count = (self.df[status_col] == 'Spatial Outlier').sum()
+            global_and_spatial_outlier_count = (self.df[status_col] == 'Global and Spatial Outlier').sum()
+            
+            report_data.append({
+                'Column': col,
+                'Total': total_count,
+                'Normal': normal_count,
+                'Normal (%)': normal_count / total_count * 100,
+                'Global Outliers': global_outlier_count,
+                'Global Outliers (%)': global_outlier_count / total_count * 100,
+                'Spatial Outliers': spatial_outlier_count,
+                'Spatial Outliers (%)': spatial_outlier_count / total_count * 100,
+                'Global and Spatial Outliers': global_and_spatial_outlier_count,
+                'Global and Spatial Outliers (%)': global_and_spatial_outlier_count / total_count * 100
+            })
+        
+        report_df = pd.DataFrame(report_data)
+        self.logger.info("数据清洗报告生成完成")
+        return report_df
 
-def main(df_path: str, lon_col: str, lat_col: str, columns: List[str], output_folder: str, global_std_threshold: float = 5, local_std_threshold: float = 3, neighbors: int = 8):
+def main(df_path: str, lon_col: str, lat_col: str, columns: List[str], output_folder: str, log_file: str, global_std_threshold: float = 5, local_std_threshold: float = 3, neighbors: int = 8):
     """
     主函数
     """
+    # 设置日志
+    if log_file:
+        log_dir = Path(log_file).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=log_file, level=logging.INFO, 
+                            format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    else:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    logger = logging.getLogger(__name__)
+
     logger.info("开始数据清洗过程")
     
     try:
         # 读取数据
         df = pd.read_csv(df_path)
         logger.info(f"已加载数据，共 {len(df)} 行")
+        
+        # 创建DataCleaner实例
+        cleaner = DataCleaner(df, lat_col, lon_col)
+        
+        # 清洗数据
+        cleaner.clean_data(columns, output_folder, global_std_threshold, local_std_threshold, neighbors)
+        output_path = Path(output_folder)
+        # 生成清洗报告
+        cleaning_report = cleaner.generate_cleaning_report(columns)
+        report_path = output_path / "cleaning_report.csv"
+        cleaning_report.to_csv(report_path, index=False)
+        logger.info(f"清洗报告已保存至 {report_path}")
+        logger.info(f"数据清洗过程完成，输出目录: {output_folder}")
+        # 检查输出文件是否存在
+        cleaned_data_path = output_path / "cleaned_data.csv"
+        summary_plot_path = output_path / "summary_plot.png"
+        
+        if cleaned_data_path.exists():
+            logger.info(f"清洗后的数据文件已生成: {cleaned_data_path}")
+        else:
+            logger.error(f"清洗后的数据文件未生成: {cleaned_data_path}")
+        
+        if summary_plot_path.exists():
+            logger.info(f"汇总图已生成: {summary_plot_path}")
+        else:
+            logger.error(f"汇总图未生成: {summary_plot_path}")
+        
     except Exception as e:
-        logger.error(f"读取数据时发生错误: {str(e)}")
-        return
-    
-    # 创建DataCleaner实例
-    cleaner = DataCleaner(df, lat_col, lon_col)
-    
-    # 清洗数据
-    cleaner.clean_data(columns, output_folder, global_std_threshold, local_std_threshold, neighbors)
-    
-    logger.info("数据清洗过程完成")
-
-if __name__ == "__main__":
-    # 示例用法
-    df_path = r"C:\Users\Runker\Desktop\GL\data\result.csv"
-    lon_col, lat_col = 'dwjd', 'dwwd'
-    columns_to_clean = ['ph', 'ylzjhl', 'yjz', 'qdan', 'qlin', 'qjia', 'qxi', 'yxlin', 'sxjia','hxjia']
-    output_folder = r"C:\Users\Runker\Desktop\GL\data_clean_result"
-    global_std_threshold = 5
-    local_std_threshold = 3
-    neighbors = 8
-    main(df_path, lon_col, lat_col, columns_to_clean, output_folder, global_std_threshold, local_std_threshold, neighbors)
+        logger.error(f"数据清洗过程中发生错误: {str(e)}")
+        raise  # 重新抛出异常，确保主程序能够捕获到错误

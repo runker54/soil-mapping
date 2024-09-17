@@ -6,11 +6,7 @@ import logging
 import sys
 from tqdm import tqdm
 from pathlib import Path
-# 设置日志
-log_file = Path('logs/check_raster.log')
-logging.basicConfig(filename=log_file, level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+
 
 def replace_nodata(raster_path, window_size=3, chunk_size=1024, logger=None):
     if logger is None:
@@ -134,13 +130,21 @@ def check_raster_consistency(raster_path, logger):
     else:
         logger.info("所有栅格在坐标参考系统、像素大小和尺寸上都是一致的。")
 
-def process_rasters(raster_path):
+def main(raster_path,log_file):
+    # 设置日志
+    if log_file:
+        log_dir = Path(log_file).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=log_file, level=logging.INFO, 
+                            format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    else:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    logger = logging.getLogger(__name__)
+    logger.info("开始检查栅格数据")
     try:
         check_raster_consistency(raster_path, logger)
-        logger.info("栅格一致性检查和无数据值替换成功完成！")
     except Exception as e:
-        logger.exception(f"发生错误: {str(e)}")
-
-if __name__ == "__main__":
-    raster_path = r'C:\Users\Runker\Desktop\GL\gl_tif_aligin'  # 替换为您的栅格文件路径
-    process_rasters(raster_path)
+        logger.error(f"检查栅格数据时发生错误: {e}")
+        raise
+    finally:
+        logger.info("栅格数据检查完成")

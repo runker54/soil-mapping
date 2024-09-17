@@ -15,13 +15,9 @@ from pykrige.rk import RegressionKriging
 from tqdm import tqdm
 from pathlib import Path
 
-# 设置日志
-log_file = Path('logs/train_soil_property.log')
-logging.basicConfig(filename=log_file, level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
-def load_data(file_path,label_col):
+
+def load_data(file_path,label_col,logger):
     """加载数据并处理缺失值"""
     logger.info(f"正在从 {file_path} 加载数据")
     data = pd.read_csv(file_path)
@@ -33,7 +29,7 @@ def load_data(file_path,label_col):
     logger.info(f"数据加载完成。形状：{data.shape}")
     return data
 
-def preprocess_data(df, feature_cols, label_col):
+def preprocess_data(df, feature_cols, label_col,logger):
     """预处理数据"""
     # 检查并转换特征列的数据类型
     for col in feature_cols:
@@ -57,7 +53,7 @@ def preprocess_data(df, feature_cols, label_col):
     logger.info(f"数据预处理完成。新形状：{df.shape}")
     return df
 
-def feature_optimization(X, y, estimator, feature_cols):
+def feature_optimization(X, y, estimator, feature_cols,logger):
     """特征优化"""
     logger.info("开始特征优化")
     selector = RFECV(estimator, step=1, cv=5)
@@ -66,7 +62,7 @@ def feature_optimization(X, y, estimator, feature_cols):
     logger.info(f"选择的特征：{selected_features}")
     return selected_features
 
-def hyperparameter_tuning(X, y, estimator, param_grid):
+def hyperparameter_tuning(X, y, estimator, param_grid,logger):
     """超参数调优"""
     logger.info("开始超参数调优")
     n_iter_search = 50
@@ -93,12 +89,12 @@ def hyperparameter_tuning(X, y, estimator, param_grid):
     logger.info(f"网格搜索得到的最佳参数：{best_params}")
     return grid_search.best_estimator_
 
-def train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, problem_type, use_feature_optimization):
+def train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, problem_type, use_feature_optimization,logger):
     """训练模型"""
     logger.info(f"正在训练 {label_col} 的模型")
     
     # 预处理数据
-    df_processed = preprocess_data(df, feature_cols + coord_cols, label_col)
+    df_processed = preprocess_data(df, feature_cols + coord_cols, label_col,logger)
     if df_processed is None:
         logger.error(f"{label_col} 的数据预处理失败")
         return None
@@ -116,7 +112,7 @@ def train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, p
             estimator = RandomForestRegressor(random_state=42)
         else:
             estimator = RandomForestClassifier(random_state=42)
-        selected_features = feature_optimization(X, y, estimator, feature_cols)
+        selected_features = feature_optimization(X, y, estimator, feature_cols,logger)
         X_selected = X[selected_features + coord_cols]
     else:
         selected_features = feature_cols
@@ -134,7 +130,7 @@ def train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, p
         estimator = RandomForestClassifier(random_state=42)
     
     # 超参数调优
-    best_model = hyperparameter_tuning(X_train, y_train, estimator, param_grid)
+    best_model = hyperparameter_tuning(X_train, y_train, estimator, param_grid,logger)
     
     # 评估RF模型
     y_train_pred = best_model.predict(X_train)
@@ -154,7 +150,7 @@ def train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, p
     
     # 保存模型
     final_features = selected_features + coord_cols
-    save_model(best_model, final_features, save_dir, label_col)
+    save_model(best_model, final_features, save_dir, label_col,logger)
     
     return {
         "selected_features": selected_features,
@@ -165,7 +161,7 @@ def train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, p
         "final_features": final_features  # 添加这一行
     }
 
-def save_model(model, feature_names, save_dir, label_col):
+def save_model(model, feature_names, save_dir, label_col,logger):
     """保存模型"""
     model_dir = save_dir / 'models'
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -197,14 +193,7 @@ def evaluate_classification(y_true, y_pred):
     f1 = f1_score(y_true, y_pred, average='weighted')
     return {"Accuracy": accuracy, "Precision": precision, "Recall": recall, "F1": f1}
 
-def save_model(model, feature_names, save_dir, label_col):
-    """保存模型"""
-    model_dir = save_dir / 'models'
-    model_dir.mkdir(parents=True, exist_ok=True)
-    
-    with open(model_dir / f"{label_col}_model.pkl", 'wb') as f:
-        pickle.dump({'model': model, 'feature_names': feature_names}, f)
-def create_excel_report(results, save_dir):
+def create_excel_report(results, save_dir,logger):
     report_dir = save_dir / 'reports'
     report_dir.mkdir(parents=True, exist_ok=True)
     
@@ -259,7 +248,7 @@ def create_excel_report(results, save_dir):
 
     logger.info(f"Excel报告已保存至 {excel_path}")
 
-def visualize_performance(results, save_dir):
+def visualize_performance(results, save_dir,logger):
     """生成优化后的性能对比图"""
     report_dir = save_dir / 'reports'
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -334,7 +323,7 @@ def visualize_performance(results, save_dir):
     plt.savefig(report_dir / 'performance_comparison.png', dpi=300, bbox_inches='tight')
     plt.close()
 
-def visualize_feature_importance(results, save_dir):
+def visualize_feature_importance(results, save_dir,logger):
     report_dir = save_dir / 'reports'
     report_dir.mkdir(parents=True, exist_ok=True)
     
@@ -355,14 +344,23 @@ def visualize_feature_importance(results, save_dir):
     plt.ylabel('Features')
     plt.xlabel('Labels')
     plt.tight_layout()
-    plt.savefig(report_dir / 'feature_importance_comparison.png')
+    plt.savefig(report_dir / 'feature_importance_comparison.png',dpi=300)
     plt.close()
 
-def main(file_path, label_dict, feature_cols, coord_cols, param_grid, save_dir, use_feature_optimization):
+def main(file_path, label_dict, feature_cols, coord_cols, param_grid, save_dir, log_file, use_feature_optimization):
     """主函数"""
+        # 设置日志
+    if log_file:
+        log_dir = Path(log_file).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=log_file, level=logging.INFO, 
+                            format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    else:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    logger = logging.getLogger(__name__)
+    logger.info("开始训练模型")
     try:
         results = {}
-        
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
         
@@ -371,51 +369,24 @@ def main(file_path, label_dict, feature_cols, coord_cols, param_grid, save_dir, 
         coord_cols = [str(col) for col in coord_cols]
         
         for label_col, problem_type in tqdm(label_dict.items(), desc="处理标签"):
-            df = load_data(file_path, label_col)
-            result = train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, problem_type, use_feature_optimization)
+            df = load_data(file_path, label_col,logger)
+            result = train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, problem_type, use_feature_optimization,logger)
             results[label_col] = result
             if result is None:
                 logger.warning(f"模型训练失败：{label_col}")
         
         # 生成Excel报告
-        create_excel_report(results, save_dir)
+        create_excel_report(results, save_dir,logger)
         
         # 生成性能对比图
-        visualize_performance(results, save_dir)
+        visualize_performance(results, save_dir,logger)
         
         # 生成特征重要性热图
-        visualize_feature_importance(results, save_dir)
+        visualize_feature_importance(results, save_dir,logger)
         
         logger.info("所有模型已训练和评估完毕。结果和可视化已保存。")
     except Exception as e:
         logger.error(f"主函数中发生错误：{str(e)}")
-
-if __name__ == "__main__":
-    # 示例用法
-    file_path = Path(r"C:\Users\Runker\Desktop\GL\sample_csv\feature_gl.csv")
-    label_dict = {
-        "ph": "regression",
-        "yjz": "regression",
-        "ylzjhl": "regression",
-        "qdan": "regression",
-        "qlin": "regression",
-        "yxlin": "regression",
-        "sxjia": "regression",
-        "hxjia": "regression",
-
-    }
-    feature_cols = ['a_DEM', 'a_evi',  'a_lswi', 'a_Mean','a_mndwi', 'a_ndmi', 'a_ndvi', 'a_ndwi', 'a_NIGHT2022', 'a_pca_1','a_pca_2']  # 您的特征列
-    coord_cols = ["a_lon", "a_lat"]
-    param_grid = {
-        'n_estimators': np.arange(10, 200, 10),
-        'max_depth': [None] + list(np.arange(10, 110, 10)),
-        'min_samples_split': [2, 5, 10],
-        'min_samples_leaf': [1, 2, 4]
-    }
-    save_dir = Path(r"C:\Users\Runker\Desktop\GL\rfrk")
-    use_feature_optimization = True
-
-    try:
-        main(file_path, label_dict, feature_cols, coord_cols, param_grid, save_dir, use_feature_optimization)
-    except Exception as e:
-        logger.error(f"发生错误：{str(e)}")
+        raise
+    finally:
+        logger.info("模型训练完成")

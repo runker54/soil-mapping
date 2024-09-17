@@ -1,5 +1,4 @@
 
-# from src.utils.logger import setup_logger
 import rasterio
 import numpy as np
 from sklearn.decomposition import PCA
@@ -8,11 +7,7 @@ import logging
 import os
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-# 设置日志
-log_file = Path('logs/multiband_index_calculator.log')
-logging.basicConfig(filename=log_file, level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+
 
 def safe_divide(numerator: np.ndarray, denominator: np.ndarray, fill_value: float = 0) -> np.ndarray:
     """Safely divide two arrays, handling division by zero."""
@@ -25,13 +20,13 @@ def safe_divide(numerator: np.ndarray, denominator: np.ndarray, fill_value: floa
     return result
 
 class RemoteSensingIndices:
-    def __init__(self, image_path: str):
+    def __init__(self, image_path: str,logger):
         self.image_path = image_path
         with rasterio.open(self.image_path) as src:
             self.meta = src.meta.copy()
             self.transform = src.transform
             self.crs = src.crs
-
+            self.logger = logger
     def _read_bands(self, band_numbers: List[int]) -> List[np.ndarray]:
         with rasterio.open(self.image_path) as src:
             bands = [src.read(i).astype(np.float32) for i in band_numbers]
@@ -104,10 +99,10 @@ class RemoteSensingIndices:
         transformed_images = transformed_data.T.reshape((n_components, height, width))
         # Log the explained variance ratio
         explained_variance_ratio = pca.explained_variance_ratio_
-        logger.info(f"Explained variance ratio: {explained_variance_ratio}")
+        self.logger.info(f"Explained variance ratio: {explained_variance_ratio}")
         return transformed_images
 
-    def save_raster(self, data: np.ndarray, output_path: str, count: int = 1) -> None:
+    def save_raster(self, data: np.ndarray, output_path: str,count: int = 1) -> None:
         """Save raster data to file"""
         out_meta = self.meta.copy()
         out_meta.update({"count": 1, "dtype": 'float32'})  # Always set count to 1 for single-band output
@@ -115,7 +110,7 @@ class RemoteSensingIndices:
         if count == 1:
             with rasterio.open(output_path, "w", **out_meta) as dest:
                 dest.write(data.astype(rasterio.float32), 1)
-            logger.info(f"Single-band data saved to {output_path}")
+            self.logger.info(f"Single-band data saved to {output_path}")
         else:
             # Split multi-band data into separate files
             base_name, ext = os.path.splitext(output_path)
@@ -123,7 +118,7 @@ class RemoteSensingIndices:
                 band_output_path = f"{base_name}_{i+1}{ext}"
                 with rasterio.open(band_output_path, "w", **out_meta) as dest:
                     dest.write(data[i].astype(rasterio.float32), 1)
-                logger.info(f"Band {i+1} saved to {band_output_path}")
+                self.logger.info(f"Band {i+1} saved to {band_output_path}")
 
     def plot_pca(self, pca_data: np.ndarray, n_components: int = 2) -> None:
         """Plot PCA components"""
@@ -137,7 +132,7 @@ class RemoteSensingIndices:
         plt.tight_layout()
         plt.show()
 
-def process_indices(input_path: str, output_dir: str, indices_config: Dict[str, Dict[str, Any]], 
+def process_indices(input_path: str, output_dir: str,logger, indices_config: Dict[str, Dict[str, Any]], 
                     pca_config: Optional[Dict[str, Any]] = None) -> None:
     """
     Process remote sensing indices and optionally perform PCA.
@@ -146,40 +141,44 @@ def process_indices(input_path: str, output_dir: str, indices_config: Dict[str, 
     :param indices_config: Configuration for indices to calculate
     :param pca_config: Configuration for PCA (optional)
     """
-    rsi = RemoteSensingIndices(input_path)
-    
+    rsi = RemoteSensingIndices(input_path,logger)
     # Calculate and save indices
     for index, params in indices_config.items():
         result = getattr(rsi, f"calculate_{index}")(*params['bands'])
         rsi.save_raster(result, os.path.join(output_dir, f"{index}.tif"))
+        logger.info(f"{index} 指数计算完成")
     
     # Perform PCA if specified
     if pca_config:
+        logger.info("开始进行PCA分析")
         pca_data = rsi.perform_pca(pca_config['bands'], pca_config['n_components'])
-        rsi.save_raster(pca_data, os.path.join(output_dir, 'pca.tif'), count=pca_config['n_components'])
+        rsi.save_raster(pca_data, os.path.join(output_dir, 'pca.tif'),count=pca_config['n_components'])
         if pca_config.get('plot', False):
             rsi.plot_pca(pca_data, pca_config['n_components'])
+        logger.info("PCA 分析完成")
+def main(input_path:str,output_dir:str,log_file:str,indices_config:Dict[str, Dict[str, Any]],pca_config:Optional[Dict[str, Any]] = None):
+    """
+    主函数，用于计算遥感指数并进行PCA分析。
+    :param input_path: 输入的遥感影像路径
+    :param output_dir: 输出目录
+    :param indices_config: 遥感指数计算配置
+    :param pca_config: PCA分析配置（可选）
+    """
+    # 配置日志，utf-8编码
+    if log_file:
+        log_dir = Path(log_file).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=log_file, level=logging.INFO, 
+                            format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
 
-# Example usage (can be removed or commented out in the actual module)
-if __name__ == "__main__":
-    # This is just for demonstration and can be removed
-    input_path = r'F:\tif_features\temp\mosaic.tif'
-    output_dir = r"F:\tif_features\temp\calc"
-    indices_config = {
-        "ndvi": {"bands": [8, 4]},
-        "savi": {"bands": [8, 4]},
-        "ndwi": {"bands": [8, 3]},
-        "evi": {"bands": [8, 4, 2]},
-        "lswi": {"bands": [8, 11]},
-        "mndwi": {"bands": [3, 11]},
-        "ndmi": {"bands": [8, 11]},
-        "vari": {"bands": [4, 3, 2]}
-    }
-    pca_config = {
-        "bands": [1,2,3,4,5,6,7,8,9,10,11,12],
-        "n_components": 2,
-        "plot": False
-    }
-    process_indices(input_path, output_dir, indices_config, pca_config)
+    else:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    logger = logging.getLogger(__name__)
+    logger.info("开始计算遥感指数") 
+    try:
+        process_indices(input_path, output_dir, logger, indices_config, pca_config)
+        logger.info("遥感指数计算完成")
+    except Exception as e:
+        logger.error(f"遥感指数计算失败: {e}")
 
 

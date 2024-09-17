@@ -6,11 +6,6 @@ import fiona
 import logging
 from pathlib import Path
 
-# 设置日志
-log_file = Path('logs/table_to_shp.log')
-logging.basicConfig(filename=log_file, level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 def table_to_shp(input_file, output_file, lon_col, lat_col, input_crs=4326, output_crs=4545):
     # 设置fiona支持utf-8编码
@@ -40,15 +35,21 @@ def table_to_shp(input_file, output_file, lon_col, lat_col, input_crs=4326, outp
 
     print(f"Shapefile已保存至: {output_file}")
 
-# 使用示例
-if __name__ == "__main__":
-    # input_file = r"F:\collection_spb_info\sp_float_data\GL\marked_data.csv"  # 或 .csv
-    input_file = r"C:\Users\Runker\Desktop\土壤培肥区域(1)\table\fg_result.csv"  # 或 .csv
-    # output_file = r"F:\cache_data\shp_file\gl\gl_sp_chemical_info.shp"
-    output_file = r"C:\Users\Runker\Desktop\土壤培肥区域(1)\table\fg_result.shp"
-    lon_col = "dwjd"
-    lat_col = "dwwd"
-    input_crs = 4490  # cgcs2000
-    output_crs = 4545  # 用户指定的输出坐标系
+def main(input_file, output_file, lon_col, lat_col,log_file, input_crs=4326, output_crs=4545):
+    # 设置日志
+    if log_file:
+        log_dir = Path(log_file).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(filename=log_file, level=logging.INFO, 
+                            format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    else:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    
+    logger = logging.getLogger(__name__)
 
-    table_to_shp(input_file, output_file, lon_col, lat_col, input_crs, output_crs)
+    logger.info("开始表格转shapefile过程")
+    try:
+        table_to_shp(input_file, output_file, lon_col, lat_col, input_crs, output_crs)
+        logger.info("表格转shapefile过程完成")
+    except Exception as e:
+        logger.error(f"表格转shapefile过程发生错误: {e}")
