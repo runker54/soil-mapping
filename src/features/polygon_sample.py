@@ -37,13 +37,34 @@ def setup_logger(name, log_file, level=logging.INFO):
 logger = setup_logger('zonal_raster', Path('logs/zonal_raster.log'))
 
 def preprocess_vector(vector_path, simplify=True, tolerance=0.001):
-    gdf = gpd.read_file(vector_path)
+    gdf = gpd.read_file(vector_path, encoding='utf-8')
+    
+    logger.info(f"原始 GeoDataFrame 形状: {gdf.shape}")
+    logger.info(f"几何类型: {gdf.geometry.geom_type.value_counts()}")
+    
+    # 检查空几何形状
+    null_geoms = gdf[gdf.geometry.isnull()]
+    if len(null_geoms) > 0:
+        logger.warning(f"发现 {len(null_geoms)} 个空几何形状")
+        gdf = gdf.dropna(subset=['geometry'])
+    
+    # 检查并移除无效几何形状
+    initial_count = len(gdf)
+    gdf = gdf[gdf.geometry.is_valid]
+    valid_count = len(gdf)
+    if initial_count != valid_count:
+        logger.warning(f"移除了 {initial_count - valid_count} 个无效几何形状")
+    
     if simplify:
         original_area = gdf.area.sum()
         gdf['geometry'] = gdf.geometry.simplify(tolerance=tolerance)
         simplified_area = gdf.area.sum()
         area_change = (simplified_area - original_area) / original_area * 100
         logger.info(f"几何简化完成。面积变化: {area_change:.2f}%")
+    
+    logger.info(f"处理后 GeoDataFrame 形状: {gdf.shape}")
+    logger.info(f"矢量数据 CRS: {gdf.crs}")
+    
     return gdf
 
 def process_single_raster(args):
@@ -111,12 +132,17 @@ def process_rasters(polygon_path, raster_folder, output_path, output_format='csv
     bounds = gdf.bounds
     df_merged['XMin'], df_merged['YMin'], df_merged['XMax'], df_merged['YMax'] = bounds.minx, bounds.miny, bounds.maxx, bounds.maxy
     
+    # 将所有列转换为字符串
+    for column in df_merged.columns:
+        if column != 'geometry':
+            df_merged[column] = df_merged[column].astype(str)
+    
     logger.info(f"保存数据到: {output_path}")
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_format.lower() == 'csv':
-        df_merged.to_csv(output_path, index=False, encoding='utf-8')
-        logger.info("数据已保存为CSV格式")
+        df_merged.to_csv(output_path, index=False, encoding='utf-8-sig')
+        logger.info("数据已保存为CSV格式（UTF-8 with BOM编码）")
     elif output_format.lower() == 'shp':
         gdf_result = gpd.GeoDataFrame(df_merged, geometry=gdf.geometry)
         gdf_result.to_file(output_path, driver='ESRI Shapefile', encoding='utf-8')
@@ -130,12 +156,12 @@ def process_rasters(polygon_path, raster_folder, output_path, output_format='csv
     logger.info(f"处理完成，总耗时: {total_time:.2f} 秒")
 
 if __name__ == "__main__":
-    polygon_path = Path(r"C:\Users\Runker\Desktop\polygon_test\shp\gl_sd_dltb.shp")
-    raster_folder = Path(r'C:\Users\Runker\Desktop\polygon_test\tif')
-    output_path = Path(r"C:\Users\Runker\Desktop\polygon_test\polygon_sample_not.csv")
-    output_format = 'csv'
+    polygon_path = Path(r"C:\Users\Runker\Desktop\fq\shp\fq.shp")
+    raster_folder = Path(r'C:\Users\Runker\Desktop\fq\tif')
+    output_path = Path(r"C:\Users\Runker\Desktop\fq\table\polygon_sample.shp")
+    output_format = 'shp'
     
     # 使用多进程
-    process_rasters(polygon_path, raster_folder, output_path, output_format, simplify=True, simplify_tolerance=0.001, use_multiprocessing=True, num_workers=2)
+    # process_rasters(polygon_path, raster_folder, output_path, output_format, simplify=True, simplify_tolerance=0.001, use_multiprocessing=True, num_workers=2)
     # 不使用多进程
-    # process_rasters(polygon_path, raster_folder, output_path, output_format, simplify=True, simplify_tolerance=0.001, use_multiprocessing=False)
+    process_rasters(polygon_path, raster_folder, output_path, output_format, simplify=True, simplify_tolerance=0.001, use_multiprocessing=False)
