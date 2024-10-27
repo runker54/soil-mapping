@@ -181,4 +181,24 @@ def main(input_path:str,output_dir:str,log_file:str,indices_config:Dict[str, Dic
     except Exception as e:
         logger.error(f"遥感指数计算失败: {e}")
 
-
+# 测试
+if __name__ == "__main__":
+    input_path = r'D:\soil-mapping\data\raw\sentinel_raster\mosaic.tif'
+    output_dir = r'D:\soil-mapping\data\raw\sentinel_raster\index_calculator'
+    log_file = r'D:\soil-mapping\logs\multiband_index_calculator.log'
+    indices_config = {
+        "ndvi": {"bands": [8, 4]},  # 归一化植被指数 (Normalized Difference Vegetation Index)
+        "savi": {"bands": [8, 4]},  # 土壤调整植被指数 (Soil Adjusted Vegetation Index)
+        "ndwi": {"bands": [3, 8]},  # 归一化差值水体指数 (Normalized Difference Water Index)
+        "evi": {"bands": [8, 4, 2]},  # 增强植被指数 (Enhanced Vegetation Index)
+        "lswi": {"bands": [8, 11]},  # 地表水体指数 (Land Surface Water Index)
+        "mndwi": {"bands": [3, 11]},  # 改进的归一化差值水体指数 (Modified Normalized Difference Water Index)
+        "ndmi": {"bands": [8, 11]},  # 归一化差值水分指数 (Normalized Difference Moisture Index)
+        "vari": {"bands": [4, 3, 2]}  # 可见光大气阻抗指数 (Visible Atmospherically Resistant Index)
+    }
+    pca_config = {
+            "bands": [1,2,3,4,5,6,7,8,9,10,11,12], # 指定要进行PCA分析的波段
+            "n_components": 2, # 指定PCA分析的数量
+            "plot": False # 是否绘制PCA分析结果
+    }
+    main(input_path, output_dir, log_file, indices_config, pca_config)

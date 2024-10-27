@@ -40,33 +40,31 @@ def preprocess_data(df, feature_cols, label_col,logger):
             except ValueError:
                 logger.error(f"无法将列 {col} 转换为数值。考虑删除此列或对其进行编码。")
                 return None
-    
+    # 仅保留需要的列
+    df = df.loc[:, [label_col] + feature_cols]  
     # 处理缺失值
     df = df.dropna(subset=[label_col] + feature_cols)
-    
     # 检查是否有无限值，并将其替换为 NaN
     df = df.replace([np.inf, -np.inf], np.nan)
-    
     # 再次删除包含 NaN 的行
     df = df.dropna(subset=[label_col] + feature_cols)
-    
     logger.info(f"数据预处理完成。新形状：{df.shape}")
     return df
 
 def feature_optimization(X, y, estimator, feature_cols,logger):
     """特征优化"""
     logger.info("开始特征优化")
-    selector = RFECV(estimator, step=1, cv=5)
+    selector = RFECV(estimator, step=1, cv=5,scoring='neg_root_mean_squared_error',n_jobs=-1)
     selector = selector.fit(X[feature_cols], y)
     selected_features = list(np.array(feature_cols)[selector.support_])
     logger.info(f"选择的特征：{selected_features}")
     return selected_features
 
-def hyperparameter_tuning(X, y, estimator, param_grid,logger):
+def hyperparameter_tuning(X, y, estimator, param_grid, cv, logger):
     """超参数调优"""
     logger.info("开始超参数调优")
     n_iter_search = 50
-    random_search = RandomizedSearchCV(estimator=estimator, param_distributions=param_grid, n_iter=n_iter_search, cv=5, random_state=42, n_jobs=-1)
+    random_search = RandomizedSearchCV(estimator=estimator, param_distributions=param_grid, n_iter=n_iter_search, cv=cv, random_state=42, n_jobs=-1)
     random_search.fit(X, y)
     best_params = random_search.best_params_
     logger.info(f"随机搜索得到的最佳参数：{best_params}")
@@ -83,13 +81,13 @@ def hyperparameter_tuning(X, y, estimator, param_grid,logger):
     else:
         param_grid_fine['max_depth'] = [max(1, best_params['max_depth'] - 5), best_params['max_depth'], best_params['max_depth'] + 5]
     
-    grid_search = GridSearchCV(estimator=estimator, param_grid=param_grid_fine, cv=5, n_jobs=-1)
+    grid_search = GridSearchCV(estimator=estimator, param_grid=param_grid_fine, cv=cv, n_jobs=-1)
     grid_search.fit(X, y)
     best_params = grid_search.best_params_
     logger.info(f"网格搜索得到的最佳参数：{best_params}")
     return grid_search.best_estimator_
 
-def train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, problem_type, use_feature_optimization,logger):
+def train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, problem_type, use_feature_optimization, cv, logger):
     """训练模型"""
     logger.info(f"正在训练 {label_col} 的模型")
     
@@ -130,7 +128,7 @@ def train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, p
         estimator = RandomForestClassifier(random_state=42)
     
     # 超参数调优
-    best_model = hyperparameter_tuning(X_train, y_train, estimator, param_grid,logger)
+    best_model = hyperparameter_tuning(X_train, y_train, estimator, param_grid, cv, logger)
     
     # 评估RF模型
     y_train_pred = best_model.predict(X_train)
@@ -150,7 +148,7 @@ def train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, p
     
     # 保存模型
     final_features = selected_features + coord_cols
-    save_model(best_model, final_features, save_dir, label_col,logger)
+    save_model(best_model, final_features, save_dir, label_col, logger)
     
     return {
         "selected_features": selected_features,
@@ -347,7 +345,7 @@ def visualize_feature_importance(results, save_dir,logger):
     plt.savefig(report_dir / 'feature_importance_comparison.png',dpi=300)
     plt.close()
 
-def main(file_path, label_dict, feature_cols, coord_cols, param_grid, save_dir, log_file, use_feature_optimization):
+def main(file_path, label_dict, feature_cols, coord_cols, param_grid, save_dir, log_file, use_feature_optimization, cv):
     """主函数"""
         # 设置日志
     if log_file:
@@ -370,7 +368,7 @@ def main(file_path, label_dict, feature_cols, coord_cols, param_grid, save_dir, 
         
         for label_col, problem_type in tqdm(label_dict.items(), desc="处理标签"):
             df = load_data(file_path, label_col,logger)
-            result = train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, problem_type, use_feature_optimization,logger)
+            result = train_model(df, label_col, feature_cols, coord_cols, param_grid, save_dir, problem_type, use_feature_optimization, cv, logger)
             results[label_col] = result
             if result is None:
                 logger.warning(f"模型训练失败：{label_col}")
@@ -390,3 +388,33 @@ def main(file_path, label_dict, feature_cols, coord_cols, param_grid, save_dir, 
         raise
     finally:
         logger.info("模型训练完成")
+
+
+# 测试
+if __name__ == "__main__":
+    file_path = r'D:\soil-mapping\data\soil_property_table\soil_property_point.csv'
+    label_dict = {
+    "ph": "regression",
+    "yjz": "regression",
+    # "ylzjhl": "regression",
+    # "qdan": "regression",
+    # "qlin": "regression",
+    # "qjia": "regression",
+    # "qxi": "regression",
+    # "yxlin": "regression",
+    # "sxjia": "regression",
+    # "hxjia": "regression",
+    }
+    feature_cols = ['a_DEM', 'a_evi', 'a_lswi', 'a_mndwi', 'a_ndmi', 'a_ndvi', 'a_ndwi', 'a_pca_1','a_pca_2', 'a_savi', 'a_vari']  # 您的特征列
+    coord_cols = ["a_lon", "a_lat"]
+    param_grid = {
+        'n_estimators': np.arange(10, 200, 10),
+        'max_depth': [None] + list(np.arange(10, 110, 10)),
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4]
+    }
+    use_feature_optimization = True # 是否使用特征优化（函数中使用的特征优化为迭代特征优化），默认True    
+    save_dir = r'D:\soil-mapping\models\soil_property'
+    log_file = r'D:\soil-mapping\logs\train_soil_property.log'
+    cv = 10  # 设置交叉验证的次数
+    main(file_path, label_dict, feature_cols, coord_cols, param_grid, save_dir, log_file, use_feature_optimization, cv)

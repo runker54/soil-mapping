@@ -111,12 +111,18 @@ def sample_rasters(point_shp_path, raster_folder_path, output_csv_path, keep_out
     # 验证输出
     df_check = pd.read_csv(output_csv_path)
     for col in df.columns:
-        if df[col].dtype == 'object':
-            if df[col].apply(lambda x: isinstance(x, (int, float)) or (isinstance(x, str) and x.replace('-', '').isdigit())).all():
-                if not (df[col] == df_check[col]).all():
-                    logger.warning(f"在列 {col} 中检测到差异")
-                    logger.warning(f"原始: {df[col].iloc[0]}")
-                    logger.warning(f"保存: {df_check[col].iloc[0]}")
+        if col in df_check.columns:  # 确保列在两个DataFrame中都存在
+            if df[col].dtype == 'object':
+                if df[col].apply(lambda x: isinstance(x, (int, float)) or (isinstance(x, str) and x.replace('-', '').isdigit())).all():
+                    try:
+                        if not (df[col].astype(str) == df_check[col].astype(str)).all():
+                            logger.warning(f"在列 {col} 中检测到差异")
+                            logger.warning(f"原始: {df[col].iloc[0]}")
+                            logger.warning(f"保存: {df_check[col].iloc[0]}")
+                    except Exception as e:
+                        logger.error(f"比较列 {col} 时出错: {str(e)}")
+        else:
+            logger.warning(f"列 {col} 在保存的CSV文件中不存在")
 
     # 检查填充值是否正确应用
     if keep_out_of_bounds:
@@ -148,3 +154,13 @@ def main(point_shp_path, raster_folder_path, output_csv_path, keep_out_of_bounds
         logger.error(f"点采样过程中发生错误: {str(e)}")
         raise
 
+
+# 测试
+if __name__ == "__main__":
+    point_shp_path = r'D:\soil-mapping\data\raw\soil_property_point\soil_property_point.shp'
+    raster_folder_path = r'D:\soil-mapping\data\soil_property'
+    output_csv_path = r'D:\soil-mapping\data\soil_property_table\soil_property_point.csv'
+    keep_out_of_bounds = False
+    fill_value = 0
+    log_file = r'D:\soil-mapping\logs\point_sample.log'
+    main(point_shp_path, raster_folder_path, output_csv_path, keep_out_of_bounds, fill_value, log_file)

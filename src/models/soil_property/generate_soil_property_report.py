@@ -410,3 +410,14 @@ def main(log_file,eval_dir, prediction_dir, output_dir, model_dir):
     except Exception as e:
         logger.error(f"生成土壤属性报告过程中发生错误: {str(e)}")
         raise
+
+
+# 测试
+if __name__ == "__main__":
+    log_file = r'D:\soil-mapping\logs\generate_soil_property_report.log'
+    eval_dir = r'D:\soil-mapping\models\soil_property'
+    prediction_dir = r'D:\soil-mapping\data\soil_property_predict'
+    output_dir = r'D:\soil-mapping\models\soil_property\reports'
+    model_dir = r'D:\soil-mapping\models\soil_property'
+    main(log_file, eval_dir, prediction_dir, output_dir, model_dir)
+

@@ -148,3 +148,10 @@ def main(raster_path,log_file):
         raise
     finally:
         logger.info("栅格数据检查完成")
+        
+
+# 测试
+if __name__ == "__main__":
+    raster_path = r'D:\soil-mapping\data\soil_property'
+    log_file = r'D:\soil-mapping\logs\check_raster.log'
+    main(raster_path, log_file)

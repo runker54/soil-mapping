@@ -4,7 +4,7 @@ import logging
 import os
 from pathlib import Path
 
-def generate_lon_lat(input_path, output_path,logger):
+def generate_lon_lat(input_path, output_path, logger):
     try:
         with rasterio.open(input_path) as src:
             # Get raster dimensions and transform
@@ -19,8 +19,8 @@ def generate_lon_lat(input_path, output_path,logger):
 
             # Convert lists to arrays for raster writing
             logger.info(f"Creating longitude and latitude rasters")
-            lon_array = np.array(xs)
-            lat_array = np.array(ys)
+            lon_array = np.array(xs).reshape((height, width))
+            lat_array = np.array(ys).reshape((height, width))
 
             # Update metadata for longitude and latitude
             out_meta = src.meta.copy()
@@ -31,19 +31,18 @@ def generate_lon_lat(input_path, output_path,logger):
             })
 
             # Write longitude to file
-            
-            with rasterio.open(os.path.join(output_path,'lon.tif'), "w", **out_meta) as dest:
+            with rasterio.open(os.path.join(output_path, 'lon.tif'), "w", **out_meta) as dest:
                 dest.write(lon_array.astype(rasterio.float32), 1)
 
             # Write latitude to file
-            with rasterio.open(os.path.join(output_path,'lat.tif'), "w", **out_meta) as dest:
+            with rasterio.open(os.path.join(output_path, 'lat.tif'), "w", **out_meta) as dest:
                 dest.write(lat_array.astype(rasterio.float32), 1)
         logger.info(f"Longitude and latitude rasters created successfully. Output saved to {output_path}")
     except Exception as e:
         logger.error(f"Error creating longitude and latitude rasters: {str(e)}")
         raise
 
-def main(input_path, output_path,log_file):
+def main(input_path, output_path, log_file):
     # 设置日志
     if log_file:
         log_dir = Path(log_file).parent
@@ -55,9 +54,17 @@ def main(input_path, output_path,log_file):
     logger = logging.getLogger(__name__)
     logger.info("开始创建经纬度栅格")
     try:
-        generate_lon_lat(input_path, output_path,logger)
+        generate_lon_lat(input_path, output_path, logger)
     except Exception as e:
         logger.error(f"创建经纬度栅格时发生错误: {e}")
         raise
     finally:
         logger.info("经纬度栅格创建完成")
+
+
+# 测试
+if __name__ == "__main__":
+    input_path = r'D:\soil-mapping\data\raw\dem\DEM.tif'
+    output_path = r'D:\soil-mapping\data\raw\process'
+    log_file = r'D:\soil-mapping\logs\create_lon_lat.log'
+    main(input_path, output_path, log_file)

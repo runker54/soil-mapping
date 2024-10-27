@@ -301,3 +301,17 @@ def main(df_path: str, lon_col: str, lat_col: str, columns: List[str], output_fo
     except Exception as e:
         logger.error(f"数据清洗过程中发生错误: {str(e)}")
         raise  # 重新抛出异常，确保主程序能够捕获到错误
+    
+
+# 测试
+if __name__ == "__main__":
+    df_path = r'D:\soil-mapping\data\soil_property_table\result.csv'
+    lon_col = 'dwjd' # 经度列名
+    lat_col = 'dwwd' # 纬度列名
+    columns =  ['ph', 'ylzjhl', 'yjz', 'qdan', 'qlin', 'qjia', 'qxi', 'yxlin', 'sxjia','hxjia'] # 需要清洗的标签列
+    output_folder = r'D:\soil-mapping\figures\data_clean'
+    log_file = r'D:\soil-mapping\logs\data_cleaning.log'
+    global_std_threshold = 5
+    local_std_threshold = 3
+    neighbors = 8
+    main(df_path, lon_col, lat_col, columns, output_folder, log_file, global_std_threshold, local_std_threshold, neighbors)

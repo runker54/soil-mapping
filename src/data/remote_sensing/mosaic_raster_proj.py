@@ -5,7 +5,6 @@ from rasterio.warp import calculate_default_transform, reproject, Resampling
 import os
 from rasterio.enums import ColorInterp
 import logging
-import sys
 from tqdm import tqdm
 from pathlib import Path
 
@@ -117,3 +116,9 @@ def main(input_dir:str,output_path:str,target_crs:str,log_file:str):
         raise
     finally:
         logger.info("栅格数据处理完成")
+if __name__ == "__main__":
+    input_dir = r'F:\GEEDOWNLOAD\sentinel2\DY_20230701_20231031'
+    output_path = r'F:\soil_mapping\dy\soil-mapping\data\raw\sentinel_raster\mosaic.tif'
+    target_crs = 'EPSG:4545'
+    log_file = r'F:\soil_mapping\dy\soil-mapping\logs\mosaic.log'
+    main(input_dir,output_path,target_crs,log_file)

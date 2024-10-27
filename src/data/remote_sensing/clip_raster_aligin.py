@@ -40,8 +40,8 @@ def align_rasters(base_raster, input_vector, other_rasters_path, output_folder, 
         window_ceiled = window.round_offsets(op='ceil')
         # 获取参考信息
         ref_transform = src.window_transform(window_ceiled)
-        ref_height = window_ceiled.height
-        ref_width = window_ceiled.width
+        ref_height = int(window_ceiled.height)
+        ref_width = int(window_ceiled.width)
         ref_crs = src.crs
 
         # 如果指定了输出坐标系，计算新的变换
@@ -58,10 +58,14 @@ def align_rasters(base_raster, input_vector, other_rasters_path, output_folder, 
     for raster in tqdm(rasters, desc="处理栅格"):
         logger.info(f"开始处理栅格: {raster}")
         with rasterio.open(raster) as src:
+            # 准备目标数组
+            dst_shape = (src.count, ref_height, ref_width)
+            dst_array = np.zeros(dst_shape, dtype=src.dtypes[0])
+
             # 重投影和裁剪栅格以匹配参考信息
-            image, transform = reproject(
-                source=rasterio.band(src, 1),
-                destination=np.zeros((ref_height, ref_width), dtype=src.dtypes[0]),
+            reproject(
+                source=rasterio.band(src, list(range(1, src.count + 1))),
+                destination=dst_array,
                 src_transform=src.transform,
                 src_crs=src.crs,
                 dst_transform=ref_transform,
@@ -82,7 +86,7 @@ def align_rasters(base_raster, input_vector, other_rasters_path, output_folder, 
             # 保存栅格
             output = Path(output_folder) / f"a_{Path(raster).name}"
             with rasterio.open(output, "w", **meta) as dest:
-                dest.write(image, 1)
+                dest.write(dst_array)
 
         logger.info(f"栅格对齐完成: {output}")
 
@@ -105,3 +109,13 @@ def main(base_raster, input_vector, other_rasters_path, output_folder, output_cr
     except Exception as e:
         logger.error(f"处理栅格时发生错误: {e}")
 
+
+# 测试
+if __name__ == "__main__":
+    base_raster = r'D:\soil-mapping\data\raw\dem\DEM.tif'
+    input_vector = r'D:\soil-mapping\data\raw\study_area\studyarea_500_s.shp'
+    other_rasters_path = r'D:\soil-mapping\data\raw\process'
+    output_folder = r'D:\soil-mapping\data\soil_property'
+    output_crs = "EPSG:4545"
+    log_file = r'D:\soil-mapping\logs\clip_raster_aligin.log'
+    main(base_raster, input_vector, other_rasters_path, output_folder, output_crs, log_file)

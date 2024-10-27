@@ -152,3 +152,11 @@ def main(region_path: str, output_folder: str, start_date: str, end_date: str,lo
     except Exception as e:
         logger.error(f"发生错误：{str(e)}")
         raise
+# 测试
+if __name__ == "__main__":
+    region_path = r'F:\soil_mapping\dy\soil-mapping\data\raw\shapefile\DY_20230701_20231031.shp'
+    output_folder = r'F:\GEEDOWNLOAD\sentinel2\DY_20230701_20231031'
+    start_date = '2023-07-01'
+    end_date = '2023-10-31'
+    log_file = r'F:\soil_mapping\dy\soil-mapping\logs\download_gee.log'
+    main(region_path, output_folder, start_date, end_date,log_file)
