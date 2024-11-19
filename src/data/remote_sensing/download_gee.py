@@ -3,17 +3,73 @@ import geemap
 import os
 import math
 import geopandas as gpd
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import logging
 import time
 import backoff
 from pathlib import Path
+import aiohttp
+import asyncio
+from urllib.parse import urlparse
 
+# 常量定义
+SENTINEL2_BANDS = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12'] # 哨兵2波段
+QA_BANDS = ['QA60', 'SCL'] # 质量控制波段
+ALL_BANDS = SENTINEL2_BANDS + QA_BANDS # 所有波段
+DEFAULT_SCALE = 10 # 默认像元大小
+DEFAULT_MAX_SIZE = 40000000  # 40MB # 每个子区域的最大大小
+DEFAULT_CLOUD_COVER = 20 # 云层覆盖率阈值
+MAX_CONCURRENT_DOWNLOADS = 5 # 并发下载的最大数量
+DOWNLOAD_TIMEOUT = 600  # 10分钟
+CHUNK_SIZE = 1024 * 1024  # 1MB
 
+class GEEDownloadError(Exception):
+    """Google Earth Engine数据下载异常类。
+    用于处理在下载GEE数据过程中可能出现的各种错误，包括但不限于：
+    - 认证失败
+    - 网络连接错误
+    - 下载超时
+    - 数据格式错误
+    - 存储空间不足
+    Attributes:
+        message (str): 错误信息
+        error_code (int, optional): 错误代码
+        details (dict, optional): 详细错误信息
+    """
+
+    def __init__(self, message: str, error_code: int = None, details: dict = None):
+        """初始化GEEDownloadError实例。
+
+        Args:
+            message: 错误描述信息
+            error_code: 错误代码（可选）
+            details: 详细错误信息字典（可选）
+        """
+        self.message = message
+        self.error_code = error_code
+        self.details = details or {}
+        super().__init__(self.message)
+
+    def __str__(self) -> str:
+        """返回格式化的错误信息。"""
+        error_msg = self.message
+        if self.error_code:
+            error_msg = f"[错误代码 {self.error_code}] {error_msg}"
+        if self.details:
+            error_msg = f"{error_msg}\n详细信息: {self.details}"
+        return error_msg
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=5)
-def authenticate_gee(logger):
-    """使用重试机制验证Google Earth Engine。"""
+def authenticate_gee(logger: logging.Logger) -> None:
+    """
+    验证Google Earth Engine服务。
+    
+    Args:
+        logger: 日志记录器实例
+    
+    Raises:
+        GEEDownloadError: 当验证失败时抛出
+    """
     logger.info("尝试验证Google Earth Engine")
     try:
         ee.Initialize()
@@ -25,33 +81,53 @@ def authenticate_gee(logger):
             ee.Initialize()
             logger.info("重新验证成功")
         except Exception as e:
-            logger.error(f"重新验证失败：{str(e)}")
-            raise
+            error_msg = f"重新验证失败：{str(e)}"
+            logger.error(error_msg)
+            raise GEEDownloadError(error_msg) from e
 
-def split_region(geometry: gpd.GeoDataFrame, col_size: float, row_size: float,logger) -> List[Tuple[float, float, float, float]]:
-    """将一个区域分割成更小的矩形。"""
-    logger.info(f"将区域分割成大小为{col_size}x{row_size}的矩形")
-    bounds = geometry.total_bounds
-    min_x, min_y, max_x, max_y = bounds
-    x_len = max_x - min_x
-    y_len = max_y - min_y
+def estimate_image_size(geometry: ee.Geometry, scale: int = 10) -> int:
+    """估算影像大小（字节）"""
+    # 获取区域面积（平方米）
+    area = geometry.area().getInfo()
+    # 计算像素数量（考虑所有波段）
+    num_bands = 12  # B1-B12
+    pixels = (area / (scale * scale)) * num_bands
+    # 估算文件大小（每个像素4字节，增加50%安全余量）
+    estimated_size = pixels * 4 * 1.5
+    return estimated_size
+
+def adaptive_split_geometry(geometry: ee.Geometry, max_size: int = 40000000, scale: int = 10) -> List[ee.Geometry]:
+    """自适应分割几何体，确保每个子区域的预计大小不超过最大限制"""
+    estimated_size = estimate_image_size(geometry, scale)
     
-    logger.info(f"Region bounds: min_x={min_x:.4f}, min_y={min_y:.4f}, max_x={max_x:.4f}, max_y={max_y:.4f}")
-    logger.info(f"Region size: x_len={x_len:.4f}, y_len={y_len:.4f}")
+    if estimated_size <= max_size:
+        return [geometry]
     
-    cols = max(1, math.ceil(x_len / col_size))
-    rows = max(1, math.ceil(y_len / row_size))
+    # 计算需要的分割数（向上取整，并增加一个额外的分割以确保安全）
+    split_factor = math.ceil(math.sqrt(estimated_size / max_size)) + 1
     
-    logger.info(f"Creating {cols}x{rows} = {cols*rows} rectangles")
+    bounds = geometry.bounds().getInfo()['coordinates'][0]
+    min_x, min_y = bounds[0]
+    max_x, max_y = bounds[2]
     
-    rectangles = [
-        (min_x + i * col_size, min_y + j * row_size, 
-         min(min_x + (i+1) * col_size, max_x), min(min_y + (j+1) * row_size, max_y))
-        for i in range(cols) for j in range(rows)
-    ]
+    width = max_x - min_x
+    height = max_y - min_y
     
-    logger.info(f"Created {len(rectangles)} rectangles")
-    return rectangles
+    x_step = width / split_factor
+    y_step = height / split_factor
+    
+    sub_geometries = []
+    for i in range(split_factor):
+        for j in range(split_factor):
+            sub_geometry = ee.Geometry.Rectangle([
+                min_x + i * x_step,
+                min_y + j * y_step,
+                min_x + (i + 1) * x_step,
+                min_y + (j + 1) * y_step
+            ])
+            sub_geometries.append(sub_geometry)
+    
+    return sub_geometries
 
 def mask_s2_clouds(image):
     """在Sentinel-2影像中遮蔽云层。"""
@@ -72,86 +148,224 @@ def get_sentinel2_collection(region: ee.Geometry, start_date: str, end_date: str
             .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', cloud_cover))
             .map(mask_s2_clouds))
 
-@backoff.on_exception(backoff.expo, ee.EEException, max_tries=5)
-def download_sentinel2_data(region: ee.Geometry, start_date: str, end_date: str, output_folder: str, logger, cloud_cover_threshold: int = 20):
+@backoff.on_exception(backoff.expo, Exception, max_tries=5)
+async def get_download_url(image: ee.Image, geometry: ee.Geometry) -> str:
+    """获取下载链接，带重试机制"""
+    return image.getDownloadURL({
+        'scale': 10,
+        'region': geometry,
+        'format': 'GEO_TIFF',
+        'crs': 'EPSG:4326'
+    })
+
+async def download_file(url: str, output_path: str, logger: logging.Logger) -> None:
+    """
+    异步下载文件。
+    
+    Args:
+        url: 下载链接
+        output_path: 输出文件路径
+        logger: 日志记录器实例
+    
+    Raises:
+        GEEDownloadError: 当下载失败时抛出
+    """
+    timeout = aiohttp.ClientTimeout(total=DOWNLOAD_TIMEOUT)
+    try:
+        conn = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    with open(output_path, 'wb') as f:
+                        while True:
+                            chunk = await response.content.read(CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                    logger.info(f"文件下载成功：{output_path}")
+                else:
+                    error_msg = f"下载失败，HTTP状态码：{response.status}"
+                    logger.error(error_msg)
+                    raise GEEDownloadError(error_msg)
+    except asyncio.TimeoutError as e:
+        error_msg = f"下载超时：{output_path}"
+        logger.error(error_msg)
+        raise GEEDownloadError(error_msg) from e
+    except Exception as e:
+        error_msg = f"下载过程发生错误：{str(e)}"
+        logger.error(error_msg)
+        raise GEEDownloadError(error_msg) from e
+
+async def download_subregion(composite: ee.Image, sub_geometry: ee.Geometry, output_path: str, logger):
+    """下载子区域的影像"""
+    try:
+        url = await get_download_url(composite, sub_geometry)
+        await download_file(url, output_path, logger)
+    except Exception as e:
+        logger.error(f"获取下载链接或下载失败：{str(e)}")
+        raise
+
+async def download_all_subregions(composite: ee.Image, sub_geometries: List[ee.Geometry], 
+                                output_folder: str, start_date: str, end_date: str, logger,
+                                max_retries: int = 3):
+    """异步下载所有子区域，包含失败重试机制"""
+    semaphore = asyncio.Semaphore(5)
+    failed_regions = []
+    
+    async def download_with_semaphore(sub_geometry, i):
+        async with semaphore:
+            output_path = os.path.join(output_folder, f'sentinel2_part_{i+1}.tif')
+            
+            # 检查文件是否已存在
+            if os.path.exists(output_path):
+                logger.info(f"文件已存在，跳过下载：{output_path}")
+                return True, i
+                
+            try:
+                await download_subregion(composite, sub_geometry, output_path, logger)
+                return True, i
+            except Exception as e:
+                logger.error(f"子区域 {i+1} 下载失败: {str(e)}")
+                return False, i
+
+    # 初始下载
+    tasks = [
+        download_with_semaphore(sub_geometry, i) 
+        for i, sub_geometry in enumerate(sub_geometries)
+    ]
+    
+    results = await asyncio.gather(*tasks, return_exceptions=False)
+    
+    # 收集失败的区域
+    failed_regions = [(i, sub_geometries[i]) for success, i in results if not success]
+    
+    # 重试失败的区域
+    retry_count = 0
+    while failed_regions and retry_count < max_retries:
+        retry_count += 1
+        logger.info(f"第 {retry_count} 次重试，还有 {len(failed_regions)} 个区域需要下载")
+        
+        # 等待一段时间后重试
+        await asyncio.sleep(5)  # 等待5秒
+            
+        retry_tasks = [
+            download_with_semaphore(sub_geometry, i)
+            for i, sub_geometry in failed_regions
+        ]
+        
+        retry_results = await asyncio.gather(*retry_tasks, return_exceptions=False)
+        
+        # 更新失败列表
+        failed_regions = [(i, sub_geometries[i]) for success, i in retry_results if not success]
+    
+    # 最终统计
+    total_regions = len(sub_geometries)
+    success_count = total_regions - len(failed_regions)
+    
+    logger.info(f"下载完成: {success_count} 成功, {len(failed_regions)} 失败")
+    
+    if failed_regions:
+        logger.warning("以下区域下载失败：")
+        for i, _ in failed_regions:
+            logger.warning(f"区域 {i+1}")
+        raise Exception(f"仍有 {len(failed_regions)} 个区域下载失败")
+    else:
+        logger.info("所有区域下载成功完成")
+
+def download_sentinel2_data(region: gpd.GeoDataFrame, start_date: str, end_date: str, 
+                          output_folder: str, logger, cloud_cover_threshold: int = 20):
     """下载给定区域和时间段的Sentinel-2数据。"""
     logger.info(f"下载{start_date}到{end_date}期间的Sentinel-2数据")
     
+    if region.crs != 'EPSG:4326':
+        logger.info(f"将坐标从{region.crs}转换为WGS84(EPSG:4326)")
+        region = region.to_crs('EPSG:4326')
+    
     os.makedirs(output_folder, exist_ok=True)
     
-    rectangles = split_region(region, 0.1, 0.1, logger)  #默认  0.1 x 0.1 度的矩形，避免下载超出限制
+    # 获取研究区域的ee.Geometry对象
+    region_geometry = ee.Geometry(region.geometry.iloc[0].__geo_interface__)
     
-    for i, rect in enumerate(rectangles):
-        logger.info(f"Processing rectangle {i+1}/{len(rectangles)}")
-        
-        rect_geometry = ee.Geometry.Rectangle(rect)
-        
+    try:
+        # 获取影像集合
         s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
-            .filterBounds(rect_geometry) \
+            .filterBounds(region_geometry) \
             .filterDate(start_date, end_date) \
-            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', cloud_cover_threshold)) \
-            .map(mask_s2_clouds)
+            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', cloud_cover_threshold))
         
-        if s2.size().getInfo() == 0:
-            logger.warning(f"No images found for rectangle {i+1}")
-            continue
+        image_count = s2.size().getInfo()
+        if image_count == 0:
+            logger.warning("没有找到符合条件的影像")
+            return
+            
+        logger.info(f"找到 {image_count} 张影像")
         
-        composite = s2.select(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12']).median()
+        # 创建合成影像
+        composite = s2.select(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12', 'QA60']) \
+                     .map(mask_s2_clouds) \
+                     .median()
         
-        export_params = {
-            'image': composite,
-            'description': f'sentinel2_composite_{i+1}',
-            'folder': 'GEE_exports',
-            'fileNamePrefix': f'sentinel2_{start_date}_{end_date}_{i+1}',
-            'region': rect_geometry,
-            'scale': 10, # 默认10米分辨率
-            'crs': 'EPSG:4326', # 默认WGS84坐标系
-            'maxPixels': 1e13 # 
-        }
+        composite = composite.select(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12'])
         
-        task = ee.batch.Export.image.toDrive(**export_params)
-        task.start()
+        # 分割区域
+        sub_geometries = adaptive_split_geometry(region_geometry)
+        logger.info(f"研究区域已被分割为 {len(sub_geometries)} 个子区域")
         
-        while task.active():
-            logger.info(f"Task {task.id} for rectangle {i+1} is {task.state()}")
-            time.sleep(30)
+        # 异步下载所有子区域，包含重试机制
+        asyncio.run(download_all_subregions(
+            composite, sub_geometries, output_folder, start_date, end_date, logger
+        ))
         
-        if task.state() == 'COMPLETED':
-            logger.info(f"Task {task.id} for rectangle {i+1} completed successfully")
-        else:
-            logger.error(f"Task {task.id} for rectangle {i+1} failed: {task.status()['error_message']}")
+        logger.info("数据下载成功完成")
+            
+    except Exception as e:
+        logger.error(f"处理过程发生错误: {str(e)}")
+        raise
 
-def main(region_path: str, output_folder: str, start_date: str, end_date: str,log_file:str):
-    """下载Sentinel-2数据的主函数。"""
+def main(
+    region_path: str,
+    output_folder: str,
+    start_date: str,
+    end_date: str,
+    log_file: Optional[str] = None
+) -> None:
+    """
+    下载Sentinel-2数据的主函数。
+
+    Args:
+        region_path: 研究区域矢量文件路径
+        output_folder: 输出文件夹路径
+        start_date: 开始日期 (YYYY-MM-DD)
+        end_date: 结束日期 (YYYY-MM-DD)
+        log_file: 日志文件路径，可选
+
+    Raises:
+        GEEDownloadError: 当下载过程发生错误时抛出
+    """
     # 配置日志
-    if log_file:
-        log_dir = Path(log_file).parent
+    log_dir = Path(log_file).parent if log_file else None
+    if log_dir:
         log_dir.mkdir(parents=True, exist_ok=True)
-        logging.basicConfig(filename=log_file, level=logging.INFO, 
-                            format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
-    else:
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',encoding='utf-8')
+    
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        encoding='utf-8'
+    )
     
     logger = logging.getLogger(__name__)
     logger.info("开始下载Sentinel-2数据")
+    
     try:
-        # 验证Google Earth Engine
-        logger.info("验证Google Earth Engine")
         authenticate_gee(logger)
-        
-        # 读取研究区域
-        logger.info("读取研究区域")
         region = gpd.read_file(region_path)
-        ee_region = geemap.geopandas_to_ee(region)
-        
-        # 下载数据
-        logger.info("下载数据")
-        download_sentinel2_data(ee_region, start_date, end_date, output_folder,logger)
-        
+        download_sentinel2_data(region, start_date, end_date, output_folder, logger)
         logger.info("数据下载成功完成")
     except Exception as e:
-        logger.error(f"发生错误：{str(e)}")
-        raise
+        error_msg = f"下载过程发生错误：{str(e)}"
+        logger.error(error_msg)
+        raise GEEDownloadError(error_msg) from e
 # 测试
 if __name__ == "__main__":
     region_path = r'F:\soil_mapping\dy\soil-mapping\data\raw\shapefile\DY_20230701_20231031.shp'
