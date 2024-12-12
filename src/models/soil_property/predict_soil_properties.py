@@ -24,7 +24,7 @@ import gc
 import psutil
 
 class SoilPropertyPredictor:
-    def __init__(self, log_file, model_dir, feature_dir, output_dir, training_data_path, coord_cols, use_rk=False, shapefile_path=None, chunk_size=1000, max_workers=8, batch_size=100):
+    def __init__(self, log_file, model_dir, feature_dir, output_dir, training_data_path, coord_cols, use_rk=False, shapefile_path=None, chunk_size=1000, max_workers=8, batch_size=100, enable_uncertainty_viz=True):
         self.logger = self._setup_logger(log_file)
         self.model_dir = Path(model_dir)
         self.feature_dir = Path(feature_dir)
@@ -36,6 +36,7 @@ class SoilPropertyPredictor:
         self.chunk_size = chunk_size
         self.max_workers = max_workers
         self.batch_size = batch_size
+        self.enable_uncertainty_viz = enable_uncertainty_viz
         plt.switch_backend('Agg')
 
     def _setup_logger(self, log_file):
