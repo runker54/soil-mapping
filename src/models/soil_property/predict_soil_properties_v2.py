@@ -27,12 +27,12 @@ from functools import wraps
 # ================ 默认配置 ================
 DEFAULT_CONFIG = {
     'paths': {
-        'log_file': r"F:\soil_mapping\dy\soil-mapping\logs\predict_soil_properties.log",
-        'model_dir': r"F:\soil_mapping\dy\figures\model\soil_property\models",
-        'feature_dir': r"F:\tif_features\county_feature\dy",
-        'output_dir':  r"F:\soil_mapping\dy\figures\soil_property_predictj",
-        'training_data_path': r'F:\soil_mapping\dy\figures\properoty_table\soil_property_point.csv',
-        'shapefile_path': r"F:\cache_data\shp_file\dy\dy_studyarea.shp"
+        'log_file': r"F:\soil_mapping\qz\soil-mapping\logs\predict_soil_properties_2.log",
+        'model_dir': r"F:\soil_mapping\qz\figures\model\soil_property\models",
+        'feature_dir': r"F:\tif_features\county_feature\qz",
+        'output_dir':  r"F:\soil_mapping\qz\figures\soil_property_predict_2",
+        'training_data_path': r'F:\soil_mapping\qz\figures\properoty_table\soil_property_point.csv',
+        'shapefile_path': r"F:\cache_data\shp_file\qz\qz_extent_p_500.shp"
     },
     'model_params': {
         'coord_cols': ["lon", "lat"],
@@ -408,7 +408,7 @@ class SoilPropertyPredictor:
             label_col: 标签列名
             
         Returns:
-            pd.DataFrame: 处理后的数据框
+            pd.DataFrame: 处理���的数据框
         """
         self.logger.info(f"正在从 {file_path} 加载数据")
         
@@ -579,7 +579,7 @@ class SoilPropertyPredictor:
             model, feature_files, window, coord_cols, is_rfrk, feature_names, mask = args
             chunk_data = {}
             
-            # 分批读取特征数��以减少内存使用
+            # 分批读取特征数据以减少内存使用
             for file in feature_files:
                 with rasterio.open(file) as src:
                     data = src.read(1, window=window)
@@ -589,9 +589,10 @@ class SoilPropertyPredictor:
                     gc.collect()
             
             rows, cols = next(iter(chunk_data.values())).shape
-            
+            total_pixels = rows * cols
+
             # 使用float32而不是float64
-            feature_array = np.zeros((rows * cols, len([f for f in feature_names if f not in coord_cols])), 
+            feature_array = np.zeros((total_pixels, len([f for f in feature_names if f not in coord_cols])), 
                                    dtype=np.float32)
             
             # 逐个填充特征数组
@@ -600,12 +601,16 @@ class SoilPropertyPredictor:
                     feature_array[:, i] = chunk_data[f].ravel()
                     del chunk_data[f]
             
-            # 应用掩膜
+            # 应用掩膜 - 修复这里的维度不匹配问题
+            chunk_mask = None
             if mask is not None:
                 chunk_mask = mask[
                     window.row_off:window.row_off+window.height,
                     window.col_off:window.col_off+window.width
                 ].ravel()
+                # 确保掩膜维度与特征数组匹配
+                if len(chunk_mask) != total_pixels:
+                    raise ValueError(f"掩膜维度 ({len(chunk_mask)}) 与特征数组维度 ({total_pixels}) 不匹配")
                 feature_array = feature_array[chunk_mask]
             
             valid_pixels = ~np.isnan(feature_array).any(axis=1)
@@ -624,10 +629,17 @@ class SoilPropertyPredictor:
                     for i in range(0, len(feature_array), batch_size):
                         batch = feature_array[i:i+batch_size]
                         if is_rfrk:
-                            coord_batch = np.stack([
-                                chunk_data[c].ravel()[valid_pixels][i:i+batch_size] 
-                                for c in coord_cols
-                            ], axis=-1)
+                            # 确保坐标数据的维度匹配
+                            if chunk_mask is not None:
+                                coord_batch = np.stack([
+                                    chunk_data[c].ravel()[chunk_mask][valid_pixels][i:i+batch_size] 
+                                    for c in coord_cols
+                                ], axis=-1)
+                            else:
+                                coord_batch = np.stack([
+                                    chunk_data[c].ravel()[valid_pixels][i:i+batch_size] 
+                                    for c in coord_cols
+                                ], axis=-1)
                             pred, unc = SoilPropertyPredictor.predict_chunk_with_uncertainty(
                                 model, batch, coord_batch, is_rfrk
                             )
@@ -642,17 +654,30 @@ class SoilPropertyPredictor:
                         gc.collect()
                     
                     # 将结果转换回原始形状
-                    if mask is not None:
-                        temp = np.full(rows * cols, np.nan)
-                        temp[chunk_mask] = predictions
-                        result = temp.reshape((rows, cols))
+                    if chunk_mask is not None:
+                        # 创建临时数组来存储结果
+                        temp_result = np.full(len(chunk_mask), np.nan)
+                        temp_uncertainty = np.full(len(chunk_mask), np.nan)
                         
-                        temp = np.full(rows * cols, np.nan)
-                        temp[chunk_mask] = uncertainties
-                        uncertainty = temp.reshape((rows, cols))
+                        # 只在有效像素位置填充预测结果
+                        valid_indices = np.where(chunk_mask)[0][valid_pixels]
+                        temp_result[valid_indices] = predictions
+                        temp_uncertainty[valid_indices] = uncertainties
+                        
+                        # 重塑为原始维度
+                        result = temp_result.reshape((rows, cols))
+                        uncertainty = temp_uncertainty.reshape((rows, cols))
                     else:
-                        result = np.array(predictions).reshape((rows, cols))
-                        uncertainty = np.array(uncertainties).reshape((rows, cols))
+                        # 如果没有掩膜，直接重塑结果
+                        valid_indices = np.where(valid_pixels)[0]
+                        temp_result = np.full(total_pixels, np.nan)
+                        temp_uncertainty = np.full(total_pixels, np.nan)
+                        
+                        temp_result[valid_indices] = predictions
+                        temp_uncertainty[valid_indices] = uncertainties
+                        
+                        result = temp_result.reshape((rows, cols))
+                        uncertainty = temp_uncertainty.reshape((rows, cols))
                 
                 except Exception as e:
                     logging.error(f"预测过程中发生错误: {str(e)}")
@@ -893,7 +918,7 @@ class SoilPropertyPredictor:
                     available_features = [f for f in feature_names if f in training_data.columns]
                     if len(available_features) != len(feature_names):
                         self.logger.warning(
-                            f"��分特征不可用: {set(feature_names) - set(available_features)}"
+                            f"部分特征不可用: {set(feature_names) - set(available_features)}"
                         )
                     
                     # 准备数据
